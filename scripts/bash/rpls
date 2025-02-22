@@ -1,0 +1,108 @@
+#!/bin/bash
+# Script para crear un playlist randomizado para evitar que se repitan hasta reprodcir todos los archivos.
+# Permite dar nombre al archivo de salida, filtrar por extensiones y excluir patrones en archivos o carpetas.
+
+# Para crear tus playlist aleatorios puedes personalizar uno de estos comandos:
+# bash rpls --name videos.m3u --files mp4,mov,flv,avi --exclude subcarpeta,archivo,patron ~/Videos
+# bash rpls --name musica.m3u --files mp3,ogg,flac,wma --exclude subcarpeta,archivo,patron ~/Musica /ruta/alternativa1 /ruta/alternativa2
+
+# Valores por defecto
+playlist_name="playlist.m3u"
+extensions=""
+exclude_patterns=""
+
+# Procesar opciones
+while [[ "$1" == -* ]]; do
+    case $1 in
+        -n|--name)
+            if [ -n "$2" ]; then
+                playlist_name="$2"
+                shift 2
+            else
+                echo "Se esperaba un nombre después de $1"
+                exit 1
+            fi
+            ;;
+        -f|--files)
+            if [ -n "$2" ]; then
+                extensions="$2"
+                shift 2
+            else
+                echo "Se esperaba una o varias extensiones después de $1"
+                exit 1
+            fi
+            ;;
+        -e|--exclude)
+            if [ -n "$2" ]; then
+                exclude_patterns="$2"
+                shift 2
+            else
+                echo "Se esperaba un patrón o patrones después de $1"
+                exit 1
+            fi
+            ;;
+        -*)
+            echo "Opción desconocida: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# Comprobar que se han pasado al menos una carpeta
+if [ "$#" -lt 1 ]; then
+    echo "Uso: $0 [-n|--name nombre_del_playlist] [-f|--files ext1,ext2,...] [-e|--exclude patron1,patron2,...] carpeta1 [carpeta2 ...]"
+    exit 1
+fi
+
+# Array para almacenar los archivos encontrados
+archivos=()
+
+# Recorrer cada carpeta proporcionada
+for carpeta in "$@"; do
+    # Construir argumentos para 'find'
+    find_args=(-type f)
+
+    # Añadir exclusiones (si se especificaron)
+    if [ -n "$exclude_patterns" ]; then
+        IFS=',' read -ra exs <<< "$exclude_patterns"
+        for ex in "${exs[@]}"; do
+            find_args+=( -not -path "*$ex*" )
+        done
+    fi
+
+    # Añadir filtro por extensión (si se especificó)
+    if [ -n "$extensions" ]; then
+        IFS=',' read -ra exts <<< "$extensions"
+        if [ ${#exts[@]} -gt 0 ]; then
+            find_args+=( \( )
+            for idx in "${!exts[@]}"; do
+                ext="${exts[$idx]}"
+                find_args+=( -iname "*.${ext}" )
+                if [ $idx -lt $((${#exts[@]} - 1)) ]; then
+                    find_args+=( -o )
+                fi
+            done
+            find_args+=( \) )
+        fi
+    fi
+
+    # Buscar archivos con los parámetros construidos
+    while IFS= read -r -d '' archivo; do
+        archivos+=("$archivo")
+    done < <(find "$carpeta" "${find_args[@]}" -print0)
+done
+
+# Comprobar si se han encontrado archivos
+if [ ${#archivos[@]} -eq 0 ]; then
+    echo "No se encontraron archivos en las carpetas especificadas con los filtros aplicados."
+    exit 1
+fi
+
+# Randomizar el listado
+playlist=$(printf "%s\n" "${archivos[@]}" | shuf)
+
+# Guardar el resultado en el archivo especificado
+echo "$playlist" > "$playlist_name"
+
+echo "Playlist creada: $playlist_name"
+echo "Número de archivos: ${#archivos[@]}"
